@@ -1,33 +1,76 @@
 services:
+  ollama:
+    image: ollama/ollama:0.1.32
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama            # cache/modelos do Ollama
+    networks:
+      - gnomo_net
+    entrypoint: ["/bin/sh", "-lc"]
+    command: |
+      /bin/ollama serve &
+      until /bin/ollama list >/dev/null 2>&1; do sleep 1; done
+      /bin/ollama pull phi3:mini || true
+      tail -f /dev/null
+    healthcheck:
+      test: [ "CMD", "/bin/ollama", "list" ]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    # GPU NVIDIA (opcional)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: ["gpu"]
+
   backend:
     build: ./backend
+    container_name: gnomo-backend
+    restart: unless-stopped
+    depends_on:
+      - ollama
     ports:
       - "4000:4000"
     volumes:
-      - ./documents:/app/documents
-      - ./embeddings:/app/embeddings
+      - documents:/app/documents
+      - embeddings:/app/embeddings
       - ./backend/users.json:/app/users.json
       - ./backend/chats.json:/app/chats.json
       - ./backend/logs.json:/app/logs.json
     environment:
-      - OLLAMA_URL=http://host.docker.internal:11434
+      - OLLAMA_URL=http://ollama:11434
       - NODE_OPTIONS=--max-old-space-size=8192
     extra_hosts:
       - "host.docker.internal:host-gateway"
     deploy:
       resources:
         limits:
-          memory: 8G
-        reservations:
           memory: 4G
+        reservations:
+          memory: 2G
+    networks:
+      - gnomo_net
 
   frontend:
     build: ./frontend
-    ports:
-      - "3000:80"
+    container_name: gnomo-frontend
+    restart: unless-stopped
     depends_on:
       - backend
+    ports:
+      - "3000:80"
+    networks:
+      - gnomo_net
+
+networks:
+  gnomo_net:
+    driver: bridge
 
 volumes:
   documents:
   embeddings:
+  ollama:
