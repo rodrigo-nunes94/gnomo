@@ -15,7 +15,7 @@ O sistema possui suporte para upload de documentos em formato `.md` (Markdown), 
 ## 2. Clone o projeto
 
 ```bash
-git clone https://github.com/gustafonso/gnomo
+git clone https://github.com/rodrigo-nunes94/gnomo
 cd gnomo
 ```
 
