@@ -4,34 +4,41 @@ x-ollama-common: &ollama-common
   container_name: ollama
   restart: unless-stopped
   ports:
-    - "11434:11434"
-  networks: [gnomo_net]
+    - "11434:11434"                # API do Ollama
   volumes:
-    - ./ollama_data:/root/.ollama
+    - ./ollama_data:/root/.ollama  # onde ficam os modelos
 
 services:
-  # --------- CPU (fallback) ---------
+  # ----------------- CPU (fallback) -----------------
   ollama-cpu:
     <<: *ollama-common
     image: ollama/ollama:latest
     profiles: ["cpu"]
+    networks:
+      gnomo_net:
+        aliases: ["ollama"]        # backend usa http://ollama:11434
 
-  # --------- NVIDIA ---------
+  # ----------------- NVIDIA -----------------
   ollama-nvidia:
     <<: *ollama-common
     image: ollama/ollama:latest
     profiles: ["gpu-nvidia"]
+    # Forma moderna (Compose v2): device requests
     deploy:
       resources:
         reservations:
           devices:
-            - driver: nvidia
+            - capabilities: ["gpu"]
+              driver: nvidia
               count: 1
-              capabilities: [gpu]
-    # Se preferir, pode usar runtime antigo:
-    # environment: { NVIDIA_VISIBLE_DEVICES: "all" }
+    # Compatibilidade (alguns hosts): NVIDIA_VISIBLE_DEVICES
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "all"
+    networks:
+      gnomo_net:
+        aliases: ["ollama"]
 
-  # --------- AMD (ROCm) ---------
+  # ----------------- AMD (ROCm) -----------------
   ollama-amd:
     <<: *ollama-common
     image: ollama/ollama:rocm
@@ -40,27 +47,31 @@ services:
       - /dev/kfd
       - /dev/dri
     group_add: ["video","render"]
-    environment:
-      # Opcional: ajuste para algumas GPUs (depende do host)
-      # HSA_OVERRIDE_GFX_VERSION: "10.3.0"  # Ex.: RDNA2
+    # Se precisar, adicione variáveis aqui (exemplo):
+    # environment:
+    #   HSA_OVERRIDE_GFX_VERSION: "10.3.0"
+    networks:
+      gnomo_net:
+        aliases: ["ollama"]
 
-  # (Opcional) INTEL – suporte ainda não oficial/variável
-  # Veja nota ao final antes de usar este profile
-  ollama-intel:
-    <<: *ollama-common
-    image: intel/ipex-llm-ollama:latest
-    profiles: ["gpu-intel"]
-    devices:
-      - /dev/dri
-    group_add: ["video","render"]
+  # (Opcional) INTEL – suporte varia; use apenas se tiver a imagem preparada
+  # ollama-intel:
+  #   <<: *ollama-common
+  #   image: intel/ipex-llm-ollama:latest
+  #   profiles: ["gpu-intel"]
+  #   devices:
+  #     - /dev/dri
+  #   group_add: ["video","render"]
+  #   networks:
+  #     gnomo_net:
+  #       aliases: ["ollama"]
 
   backend:
     build: ./backend
     container_name: gnomo-backend
     restart: unless-stopped
-    depends_on:
-      - ollama
-    ports: ["4000:4000"]
+    ports:
+      - "4000:4000"
     volumes:
       - ./documents:/app/documents
       - ./embeddings:/app/embeddings
@@ -70,28 +81,29 @@ services:
     environment:
       - OLLAMA_URL=http://ollama:11434
       - NODE_OPTIONS=--max-old-space-size=8192
-    networks: [gnomo_net]
+    networks:
+      - gnomo_net
+    # Observação: 'deploy.resources' tem efeito pleno no Swarm; no Compose local é parcialmente ignorado.
     deploy:
       resources:
-        limits: { memory: 8G }
-        reservations: { memory: 4G }
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
 
   frontend:
     build: ./frontend
     container_name: gnomo-frontend
     restart: unless-stopped
-    depends_on: [backend]
-    ports: ["3000:80"]
-    networks: [gnomo_net]
-
-  # Alias lógico para o serviço de IA, independente do profile escolhido
-  ollama:
-    image: scratch
-    profiles: ["never"] # nunca sobe
-    networks: [gnomo_net]
+    # Não usamos depends_on, pois o serviço de IA varia por profile.
+    ports:
+      - "3000:80"
+    networks:
+      - gnomo_net
 
 networks:
-  gnomo_net: { driver: bridge }
+  gnomo_net:
+    driver: bridge
 
 volumes:
   documents:
